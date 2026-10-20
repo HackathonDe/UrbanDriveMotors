@@ -490,6 +490,14 @@
   details.col[open] summary::after{content:"\25B4"}
   details.col[open] summary{border-bottom:1px solid var(--line)}
   .board .cards{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.sqlbox{max-height:280px;overflow:auto;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:12px;font:12.5px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;margin:12px 0}
+/* ---- Password show/hide eye ---- */
+.pw-wrap{position:relative;display:block}
+.pw-wrap > input{display:block;padding-right:48px !important}
+.pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:0;background:transparent;color:var(--muted,#666);cursor:pointer;display:grid;place-items:center;border-radius:6px;padding:0;min-height:0}
+.pw-eye:hover{color:var(--ink,#111);background:rgba(128,128,128,.14)}
+.pw-eye svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.pw-eye .off{display:none}.pw-eye[aria-pressed="true"] .on{display:none}.pw-eye[aria-pressed="true"] .off{display:block}
 </style>
 </head>
 <body>
@@ -770,6 +778,7 @@
       <section id="pg-customers" hidden></section>
       <section id="pg-enquiries" hidden></section>
       <section id="pg-bookings" hidden></section>
+      <section id="pg-hiring" hidden></section>
       <section id="pg-submissions" hidden></section>
       <section id="pg-messages" hidden></section>
       <section id="pg-finance" hidden></section>
@@ -1178,6 +1187,7 @@ async function loadAll(){
   (A.views_by_vehicle || []).forEach(x => { viewCount[x.vehicle_id] = x.views; viewerCount[x.vehicle_id] = x.viewers; });
   (A.views_by_user || []).forEach(x => { userViewed[x.user_id] = x.vehicles; });
   enquiries.forEach(x => { if (x.vehicle_id) enqCount[x.vehicle_id] = (enqCount[x.vehicle_id] || 0) + 1; });
+  await loadHiring();
   $('nVeh') && ($('nVeh').textContent = vehicles.length);
   updateBadges();
 }
@@ -1207,10 +1217,11 @@ const ICONS = {
 };
 const NAV = [
   ['dashboard', 'Dashboard', false], ['inventory', 'Vehicle Inventory', false], ['submissions', 'Seller Submissions', false], ['messages', 'Messages', false],
-  ['customers', 'Customers', false], ['enquiries', 'Enquiries', false], ['bookings', 'Bookings', false], ['sales', 'Sales & Payments', true], ['finance', 'Finance & Expenses', true],
+  ['customers', 'Customers', false], ['enquiries', 'Enquiries', false], ['bookings', 'Bookings', false], ['hiring', 'Hiring', false], ['sales', 'Sales & Payments', true], ['finance', 'Finance & Expenses', true],
   ['website', 'Website Content', true], ['ads', 'Ads Manager', true], ['users', 'Register Users', true], ['logs', 'Employee Logs', true]
 ];
 ICONS.sales = ICONS.sales || ICONS.finance;
+ICONS.hiring = '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18M11 13v2h2v-2"/>';
 ICONS.ads = ICONS.ads || '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/>';
 ICONS.logs = ICONS.logs || '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7"/>';
 function buildNav(){
@@ -1218,7 +1229,7 @@ function buildNav(){
     '<a href="#/' + n[0] + '" data-nav="' + n[0] + '"><svg viewBox="0 0 24 24">' + ICONS[n[0]] + '</svg>' + esc(n[1]) + '<span class="n" id="nb-' + n[0] + '" hidden>0</span></a>').join('');
 }
 let SEEN = {}, SEEN_FOR = null;
-const SEEN_PAGES = ['enquiries', 'bookings', 'submissions', 'messages'];
+const SEEN_PAGES = ['enquiries', 'bookings', 'submissions', 'messages', 'hiring'];
 function seenLoad(){ if (SEEN_FOR === MYEMAIL) return; SEEN_FOR = MYEMAIL; try { SEEN = JSON.parse(localStorage.getItem('udm-seen:' + (MYEMAIL || '')) || '{}') || {}; } catch (x) { SEEN = {}; } }
 function markSeen(name){ seenLoad(); SEEN[name] = Date.now(); try { localStorage.setItem('udm-seen:' + (MYEMAIL || ''), JSON.stringify(SEEN)); } catch (x) {} }
 const isNewSince = (name, iso) => { seenLoad(); const t = SEEN[name]; return !t || !iso || new Date(iso).getTime() > t; };
@@ -1344,6 +1355,7 @@ function updateBadges(){
   setBadge('bookings', bookings.filter(b => b.status === 'requested' && isNewSince('bookings', b.created_at)).length);
   setBadge('submissions', submissions.filter(x => x.status === 'pending' && isNewSince('submissions', x.created_at)).length);
   setBadge('messages', sum(conversations.filter(c => isNewSince('messages', c.last_at)), c => c.unread));
+  setBadge('hiring', jobApps.filter(a => a.status === 'new' && isNewSince('hiring', a.created_at)).length);
 }
 
 
@@ -3094,7 +3106,7 @@ register('messages', { render: renderMessagesPage });
 
 
 /* ================= ADD-ON: permissions, Register Users, profit calculator, clear all data ================= */
-const ALLOWED_SECTIONS = [['inventory', 'Vehicle Inventory'], ['submissions', 'Seller Submissions'], ['messages', 'Messages'], ['customers', 'Customers'], ['enquiries', 'Enquiries'], ['bookings', 'Bookings (test drives and viewings)']];
+const ALLOWED_SECTIONS = [['inventory', 'Vehicle Inventory'], ['submissions', 'Seller Submissions'], ['messages', 'Messages'], ['customers', 'Customers'], ['enquiries', 'Enquiries'], ['bookings', 'Bookings (test drives and viewings)'], ['hiring', 'Hiring (jobs and applications)']];
 const STAFF_DOMAIN = '@urbandrive.co.ke';
 let PERMS = [], staff = [];
 function canSee(name){
@@ -3515,6 +3527,246 @@ async function expireSession(){
   if (appReady || $('login').hidden) { appReady = false; clearInterval(pollTimer); show('login'); }
 }
 
+
+/* ================= Hiring: job openings and applications ================= */
+var jobs = [], jobApps = [], jobCats = [], hiringReady = true;
+const JOB_TYPES = ['Full-time', 'Part-time', 'Contract', 'Internship', 'Commission-based'];
+const JOB_LEVELS = ['Entry level', 'Mid level', 'Senior', 'Management'];
+const JOB_STATUS = { draft: ['Draft', 'mute'], open: ['Open', 'ok'], closed: ['Closed', 'bad'] };
+const APP_STATUS = [['new', 'New'], ['reviewing', 'Reviewing'], ['shortlisted', 'Shortlisted'], ['interview', 'Interview'], ['offered', 'Offered'], ['hired', 'Hired'], ['rejected', 'Not selected']];
+const APP_LABEL = Object.fromEntries(APP_STATUS);
+const appTone = st => st === 'hired' ? 'ok' : st === 'rejected' ? 'mute' : st === 'new' ? 'warn' : 'info';
+const CV_BUCKET = 'job-applications';
+const hire = { tab: 'apps', status: 'all', job: 'all', q: '' };
+const HIRING_SQL = "-- Urban Drive Motors: Hiring (Careers page + admin). Already applied to your database.\n-- Kept here for reference; safe to run again.\ncreate table if not exists public.job_categories (id uuid primary key default gen_random_uuid(), name text not null, sort_order int default 0, created_at timestamptz default now());\ncreate unique index if not exists job_categories_name_key on public.job_categories (lower(name));\ncreate table if not exists public.jobs (id uuid primary key default gen_random_uuid(), title text not null, category_id uuid references public.job_categories(id) on delete set null, department text, location text, job_type text default 'Full-time', experience text, salary_range text, show_salary boolean default false, summary text, description text, requirements text, benefits text, deadline date, status text not null default 'draft' check (status in ('draft','open','closed')), created_by text, created_at timestamptz default now(), updated_at timestamptz default now());\ncreate table if not exists public.job_applications (id uuid primary key default gen_random_uuid(), job_id uuid references public.jobs(id) on delete set null, job_title text, full_name text not null, email text not null, phone text, location text, experience text, linkedin text, message text, cv_path text, status text not null default 'new' check (status in ('new','reviewing','shortlisted','interview','offered','hired','rejected')), notes text, created_at timestamptz default now());\nalter table public.job_categories enable row level security;\nalter table public.jobs enable row level security;\nalter table public.job_applications enable row level security;\n-- Policies: public reads categories and open jobs; anyone can apply; admins (public.my_role() is not null) manage everything.\n-- Storage: private bucket \"job-applications\" (5 MB), anyone can upload a CV, only admins can read or delete.\n";
+const catName = j => (jobCats.find(c => c.id === j.category_id) || {}).name || j.department || '';
+const jobTitleOf = a => a.job_title || ((jobs.find(j => j.id === a.job_id) || {}).title) || 'General application';
+async function loadHiring(){
+  if (!canSee('hiring')) { jobs = []; jobApps = []; jobCats = []; hiringReady = true; return; }
+  try {
+    const [j, a, c] = await Promise.all([
+      sb.from('jobs').select('*').order('created_at', { ascending: false }),
+      sb.from('job_applications').select('*').order('created_at', { ascending: false }).limit(1000),
+      sb.from('job_categories').select('*').order('sort_order').order('name')
+    ]);
+    hiringReady = !(j.error || a.error || c.error);
+    jobs = j.error ? [] : (j.data || []); jobApps = a.error ? [] : (a.data || []); jobCats = c.error ? [] : (c.data || []);
+  } catch (e) { hiringReady = false; jobs = []; jobApps = []; jobCats = []; }
+}
+async function refreshHiring(){ await loadHiring(); updateBadges(); renderHiringPage(); }
+function appsBody(){
+  const q = hire.q.trim().toLowerCase();
+  const list = jobApps.filter(a => (hire.status === 'all' || a.status === hire.status) && (hire.job === 'all' || (hire.job === 'none' ? !a.job_id : a.job_id === hire.job)) &&
+    (!q || [a.full_name, a.email, a.phone, a.location, jobTitleOf(a)].join(' ').toLowerCase().includes(q)));
+  const chips = [['all', 'All']].concat(APP_STATUS).map(([k, l]) => '<button class="chip hchip" type="button" data-s="' + k + '" aria-pressed="' + (hire.status === k) + '">' + l + '<span class="c">' + (k === 'all' ? jobApps.length : jobApps.filter(a => a.status === k).length) + '</span></button>').join('');
+  const jobOpts = '<option value="all">All roles</option><option value="none"' + (hire.job === 'none' ? ' selected' : '') + '>General applications</option>' + jobs.map(j => '<option value="' + esc(j.id) + '"' + (hire.job === j.id ? ' selected' : '') + '>' + esc(j.title) + '</option>').join('');
+  return '<div class="chips" role="group" aria-label="Filter by status">' + chips + '</div>' +
+    '<div class="tools"><select id="hi_job" aria-label="Role">' + jobOpts + '</select><input type="search" id="hi_q" placeholder="Search name, email, phone or role" aria-label="Search applications" value="' + esc(hire.q) + '"><button class="btn small" id="hiExport" type="button">Export CSV</button></div>' +
+    tbl([
+      { h: 'Applicant', f: a => '<div class="nm">' + esc(a.full_name) + '</div><div class="sub">' + esc(a.email) + (a.phone ? ' \u00b7 ' + esc(a.phone) : '') + '</div>' },
+      { h: 'Role', f: a => esc(jobTitleOf(a)) + (a.location ? '<div class="sub">' + esc(a.location) + '</div>' : '') },
+      { h: 'Experience', f: a => esc(a.experience || '') },
+      { h: 'Applied', f: a => esc(when(a.created_at)) },
+      { h: 'Status', f: a => '<select class="hst" data-id="' + esc(a.id) + '" aria-label="Status">' + APP_STATUS.map(o => '<option value="' + o[0] + '"' + (a.status === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' },
+      { h: '', f: a => '<div class="acts"><button class="btn small hview" data-id="' + esc(a.id) + '" type="button">View</button>' + (a.cv_path ? '<button class="btn small hcv" data-id="' + esc(a.id) + '" type="button">CV</button>' : '') + '<button class="btn small danger hdel" data-id="' + esc(a.id) + '" type="button">Delete</button></div>' }
+    ], list, { empty: jobApps.length ? 'Nothing matches your filters.' : 'No applications yet. They appear here when someone applies on the Careers page of your website.' });
+}
+function jobsBody(){
+  return tbl([
+    { h: 'Position', f: j => '<div class="nm">' + esc(j.title) + '</div><div class="sub">' + esc(j.location || '') + '</div>' },
+    { h: 'Category', f: j => catName(j) ? esc(catName(j)) : '<span class="sub">None</span>' },
+    { h: 'Type', f: j => esc(j.job_type || '') + (j.experience ? '<div class="sub">' + esc(j.experience) + '</div>' : '') },
+    { h: 'Applications', cls: 'num', f: j => { const n = jobApps.filter(a => a.job_id === j.id).length, nn = jobApps.filter(a => a.job_id === j.id && a.status === 'new').length; return n + (nn ? '<div class="sub">' + nn + ' new</div>' : ''); } },
+    { h: 'Deadline', f: j => j.deadline ? esc(day(j.deadline)) : '<span class="sub">None</span>' },
+    { h: 'Status', f: j => pill((JOB_STATUS[j.status] || [j.status])[0], (JOB_STATUS[j.status] || [0, 'mute'])[1]) },
+    { h: '', f: j => '<div class="acts"><button class="btn small jview" data-id="' + esc(j.id) + '" type="button">Applicants</button><button class="btn small jedit" data-id="' + esc(j.id) + '" type="button">Edit</button><button class="btn small ' + (j.status === 'open' ? '' : 'green ') + 'jtoggle" data-id="' + esc(j.id) + '" type="button">' + (j.status === 'open' ? 'Close' : 'Publish') + '</button><button class="btn small danger jdel" data-id="' + esc(j.id) + '" type="button">Delete</button></div>' }
+  ], jobs, { empty: jobCats.length ? 'No positions yet. Press "Add position" to post your first opening. Open positions appear on the Careers page.' : 'Start by adding a category (for example the team or area the job belongs to), then add positions under it.' });
+}
+function catsBody(){
+  return tbl([
+    { h: 'Category', f: c => '<div class="nm">' + esc(c.name) + '</div>' },
+    { h: 'Positions', cls: 'num', f: c => { const n = jobs.filter(j => j.category_id === c.id), o = n.filter(j => j.status === 'open').length; return n.length + (o ? '<div class="sub">' + o + ' open</div>' : ''); } },
+    { h: '', f: c => '<div class="acts"><button class="btn small cview" data-id="' + esc(c.id) + '" type="button">Positions</button><button class="btn small cedit" data-id="' + esc(c.id) + '" type="button">Rename</button><button class="btn small danger cdel" data-id="' + esc(c.id) + '" type="button">Delete</button></div>' }
+  ], jobCats, { empty: 'No categories yet. Press "Add category" to create the first one. Categories you add here appear as filters on the Careers page.' });
+}
+function renderHiringPage(){
+  const head = pageHead('Hiring', 'Create job categories and positions for the Careers page, and review the people who apply.', hiringReady ? '<button class="btn" id="hiNewCat" type="button">Add category</button><button class="btn green" id="hiNew" type="button">Add position</button>' : '');
+  if (!hiringReady) {
+    mount('hiring', head + '<div class="hint-box"><b>One-time setup needed.</b> The hiring tables are not in your database yet. Copy the SQL below, run it once in the Supabase SQL editor, then press "Check again".</div><div class="sqlbox" tabindex="0">' + esc(HIRING_SQL) + '</div><div class="linkrow"><button class="btn small" id="hiCopy" type="button">Copy SQL</button><button class="btn small green" id="hiRetry" type="button">Check again</button></div>');
+    return;
+  }
+  const newN = jobApps.filter(a => a.status === 'new').length;
+  const kpis = '<div class="kpis"><div class="kpi"><div class="t">Open roles</div><b>' + jobs.filter(j => j.status === 'open').length + '</b><div class="s">' + jobs.length + ' in total</div></div>' +
+    '<div class="kpi"><div class="t">Applications</div><b>' + jobApps.length + '</b><div class="s">' + newN + ' not yet reviewed</div></div>' +
+    '<div class="kpi"><div class="t">Shortlisted or interviewing</div><b>' + jobApps.filter(a => ['shortlisted', 'interview', 'offered'].includes(a.status)).length + '</b><div class="s">In progress</div></div>' +
+    '<div class="kpi"><div class="t">Hired</div><b>' + jobApps.filter(a => a.status === 'hired').length + '</b><div class="s">All time</div></div></div>';
+  const tabs = '<div class="subtabs" role="tablist"><button class="subtab hitab" role="tab" data-t="apps" aria-selected="' + (hire.tab === 'apps') + '">Applications<span class="n">' + jobApps.length + '</span></button>' +
+    '<button class="subtab hitab" role="tab" data-t="jobs" aria-selected="' + (hire.tab === 'jobs') + '">Positions<span class="n">' + jobs.length + '</span></button>' +
+    '<button class="subtab hitab" role="tab" data-t="cats" aria-selected="' + (hire.tab === 'cats') + '">Categories<span class="n">' + jobCats.length + '</span></button></div>';
+  mount('hiring', head + kpis + tabs + (hire.tab === 'apps' ? appsBody() : hire.tab === 'cats' ? catsBody() : jobsBody()));
+}
+register('hiring', { render: renderHiringPage });
+
+async function jobForm(j){
+  const editing = !!j;
+  const fields = [
+    { name: 'title', label: 'Job title', required: true, full: true, placeholder: 'e.g. Sales Executive' },
+    { name: 'category_id', label: 'Category', type: 'select', options: [['', jobCats.length ? 'Choose a category' : 'No categories yet. Add one on the right.']].concat(jobCats.map(c => [c.id, c.name])) },
+    { name: 'new_category', label: 'Or add a new category', placeholder: 'Type a new category name', hint: 'Leave empty to use the category chosen on the left.' },
+    { name: 'location', label: 'Location', placeholder: 'Nairobi' },
+    { name: 'job_type', label: 'Job type', type: 'select', options: JOB_TYPES.map(x => [x, x]) },
+    { name: 'experience', label: 'Experience level', type: 'select', options: [['', 'Not specified']].concat(JOB_LEVELS.map(x => [x, x])) },
+    { name: 'salary_range', label: 'Salary range (optional)', placeholder: 'KES 60,000 - 90,000' },
+    { name: 'deadline', label: 'Application deadline (optional)', type: 'date' },
+    { name: 'status', label: 'Status', type: 'select', options: [['draft', 'Draft (hidden)'], ['open', 'Open (visible on the website)'], ['closed', 'Closed']] },
+    { name: 'show_salary', label: 'Show the salary range on the website', type: 'checkbox', full: true },
+    { name: 'summary', label: 'Short summary', type: 'textarea', rows: 2, full: true, hint: 'One or two lines shown on the job card.' },
+    { name: 'description', label: 'About the role', type: 'textarea', rows: 6, required: true, full: true, hint: 'Start a line with - to make a bullet point.' },
+    { name: 'requirements', label: 'What we are looking for', type: 'textarea', rows: 5, full: true },
+    { name: 'benefits', label: 'What we offer', type: 'textarea', rows: 4, full: true }
+  ];
+  const ok = await formDialog({ title: editing ? 'Edit position' : 'Add position', fields, wide: true, submit: editing ? 'Save changes' : 'Save position', values: j || { job_type: 'Full-time', status: 'draft', category_id: (jobCats[0] || {}).id || '' },
+    onSubmit: async v => {
+      let catId = v.category_id || null;
+      const newName = (v.new_category || '').trim();
+      if (newName) {
+        const hit = jobCats.find(c => c.name.toLowerCase() === newName.toLowerCase());
+        if (hit) catId = hit.id;
+        else {
+          const cr = await sb.from('job_categories').insert({ name: newName }).select('id').single();
+          if (cr.error) return friendly(cr.error);
+          catId = cr.data.id;
+        }
+      }
+      if (!catId) return 'Choose a category or type a new one.';
+      const row = Object.assign({}, v, { category_id: catId, deadline: v.deadline || null });
+      delete row.new_category;
+      const r = editing ? await sb.from('jobs').update(Object.assign({}, row, { updated_at: new Date().toISOString() })).eq('id', j.id) : await sb.from('jobs').insert(Object.assign({}, row, { created_by: MYEMAIL }));
+      return r.error ? friendly(r.error) : null;
+    } });
+  if (ok) { toast(editing ? 'Position saved.' : 'Position added.'); await refreshHiring(); }
+}
+async function catForm(c){
+  const editing = !!c;
+  const ok = await formDialog({ title: editing ? 'Rename category' : 'Add category', fields: [{ name: 'name', label: 'Category name', required: true, full: true, placeholder: 'e.g. the team or area of work' }], values: c || {}, submit: editing ? 'Save' : 'Add category',
+    onSubmit: async v => {
+      const name = (v.name || '').trim();
+      if (jobCats.some(x => x.name.toLowerCase() === name.toLowerCase() && (!editing || x.id !== c.id))) return 'That category already exists.';
+      const r = editing ? await sb.from('job_categories').update({ name }).eq('id', c.id) : await sb.from('job_categories').insert({ name });
+      return r.error ? friendly(r.error) : null;
+    } });
+  if (ok) { toast(editing ? 'Category renamed.' : 'Category added.'); await refreshHiring(); }
+}
+function openApplication(id){
+  const a = jobApps.find(x => x.id === id); if (!a) return;
+  infoDialog(a.full_name,
+    pill(APP_LABEL[a.status] || a.status, appTone(a.status)) + ' <span class="sub">Applied ' + esc(when(a.created_at)) + '</span>' +
+    '<h2 class="sec" style="margin-top:14px">Applicant</h2><dl class="kv"><dt>Role</dt><dd>' + esc(jobTitleOf(a)) + '</dd><dt>Email</dt><dd>' + esc(a.email) + '</dd><dt>Phone</dt><dd>' + esc(a.phone || '') + '</dd><dt>Location</dt><dd>' + esc(a.location || '') + '</dd><dt>Experience</dt><dd>' + esc(a.experience || '') + '</dd>' +
+    (a.linkedin ? '<dt>Link</dt><dd><a href="' + esc(a.linkedin) + '" target="_blank" rel="noopener">' + esc(a.linkedin) + '</a></dd>' : '') + '</dl>' +
+    contactLinks(a.phone, a.email) +
+    (a.message ? '<h2 class="sec" style="margin-top:14px">Message</h2><p>' + esc(a.message).replace(/\n/g, '<br>') + '</p>' : '') +
+    (a.cv_path ? '<div class="linkrow"><button class="btn small green" data-act="cv" type="button">Open CV</button></div>' : '<p class="sub">No CV attached.</p>') +
+    '<h2 class="sec" style="margin-top:14px">Decision</h2><label for="app_status">Status</label><select id="app_status">' + APP_STATUS.map(o => '<option value="' + o[0] + '"' + (a.status === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+    '<label for="app_notes">Your private notes</label><textarea id="app_notes" rows="3">' + esc(a.notes || '') + '</textarea>' +
+    '<div class="linkrow"><button class="btn small green" data-act="save" type="button">Save</button><button class="btn small danger" data-act="delete" type="button">Delete</button></div>',
+    { type: 'application', id });
+}
+async function openCv(id){
+  const a = jobApps.find(x => x.id === id); if (!a || !a.cv_path) return;
+  const w = window.open('', '_blank');
+  const r = await sb.storage.from(CV_BUCKET).createSignedUrl(a.cv_path, 300);
+  if (r.error || !r.data) { if (w) w.close(); toast('Could not open the CV. ' + friendly(r.error), true); return; }
+  if (w) w.location = r.data.signedUrl; else location.href = r.data.signedUrl;
+}
+async function deleteApplication(id){
+  const a = jobApps.find(x => x.id === id); if (!a) return;
+  if (!(await askConfirm({ title: 'Delete this application?', text: 'The application and the CV file are removed. This cannot be undone.', yes: 'Yes, delete', no: 'Keep it' }))) return;
+  if (!(await run(sb.from('job_applications').delete().eq('id', id), 'Application deleted.'))) return;
+  if (a.cv_path) { try { await sb.storage.from(CV_BUCKET).remove([a.cv_path]); } catch (e) {} }
+  closeInfo(); await refreshHiring();
+}
+XACT.application = {
+  cv: id => openCv(id),
+  delete: id => deleteApplication(id),
+  save: async id => {
+    if (await run(sb.from('job_applications').update({ status: $('app_status').value, notes: $('app_notes').value.trim() }).eq('id', id), 'Saved.')) { await loadHiring(); updateBadges(); renderHiringPage(); openApplication(id); }
+  }
+};
+(() => {
+  const root = $('pg-hiring');
+  on(root, 'click', '.hitab', el => { hire.tab = el.dataset.t; renderHiringPage(); });
+  on(root, 'click', '#hiNew', () => jobForm(null));
+  on(root, 'click', '#hiNewCat', () => catForm(null));
+  on(root, 'click', '.cedit', el => catForm(jobCats.find(c => c.id === el.dataset.id)));
+  on(root, 'click', '.cview', () => { hire.tab = 'jobs'; renderHiringPage(); });
+  on(root, 'click', '.cdel', async el => {
+    const c = jobCats.find(x => x.id === el.dataset.id); if (!c) return;
+    const n = jobs.filter(j => j.category_id === c.id).length;
+    if (!(await askConfirm({ title: 'Delete "' + c.name + '"?', text: n ? n + ' position' + (n === 1 ? '' : 's') + ' in this category will have no category. You can give them a new one by editing them.' : 'This category has no positions.', yes: 'Yes, delete', no: 'Keep it' }))) return;
+    if (await run(sb.from('job_categories').delete().eq('id', c.id), 'Category deleted.')) await refreshHiring();
+  });
+  on(root, 'click', '#hiCopy', async () => { try { await navigator.clipboard.writeText(HIRING_SQL); toast('SQL copied.'); } catch (e) { toast('Select the SQL and copy it by hand.', true); } });
+  on(root, 'click', '#hiRetry', async () => { showLoader('Checking...'); await loadHiring(); hideLoader(); updateBadges(); renderHiringPage(); if (!hiringReady) toast('Still not set up. Run the SQL first.', true); });
+  on(root, 'click', '.hchip', el => { hire.status = el.dataset.s; renderHiringPage(); });
+  on(root, 'click', '.hview', el => openApplication(el.dataset.id));
+  on(root, 'click', '.hcv', el => openCv(el.dataset.id));
+  on(root, 'click', '.hdel', el => deleteApplication(el.dataset.id));
+  on(root, 'click', '.jedit', el => jobForm(jobs.find(j => j.id === el.dataset.id)));
+  on(root, 'click', '.jview', el => { hire.tab = 'apps'; hire.job = el.dataset.id; hire.status = 'all'; renderHiringPage(); });
+  on(root, 'click', '.jtoggle', async el => {
+    const j = jobs.find(x => x.id === el.dataset.id); if (!j) return;
+    const next = j.status === 'open' ? 'closed' : 'open';
+    if (await run(sb.from('jobs').update({ status: next, updated_at: new Date().toISOString() }).eq('id', j.id), next === 'open' ? 'Position published on the Careers page.' : 'Position closed.')) await refreshHiring();
+  });
+  on(root, 'click', '.jdel', async el => {
+    const j = jobs.find(x => x.id === el.dataset.id); if (!j) return;
+    if (!(await askConfirm({ title: 'Delete "' + j.title + '"?', text: 'The position is removed from the website. Applications already received are kept.', yes: 'Yes, delete', no: 'Keep it' }))) return;
+    if (await run(sb.from('jobs').delete().eq('id', j.id), 'Position deleted.')) await refreshHiring();
+  });
+  on(root, 'click', '#hiExport', () => {
+    const rows = [['Name', 'Email', 'Phone', 'Role', 'Location', 'Experience', 'Status', 'Applied']].concat(jobApps.map(a => [a.full_name, a.email, a.phone, jobTitleOf(a), a.location, a.experience, APP_LABEL[a.status] || a.status, when(a.created_at)]));
+    download('applications-' + todayStr() + '.csv', csv(rows));
+  });
+  root.addEventListener('change', async e => {
+    if (e.target.id === 'hi_job') { hire.job = e.target.value; renderHiringPage(); }
+    if (e.target.classList.contains('hst')) {
+      if (await run(sb.from('job_applications').update({ status: e.target.value }).eq('id', e.target.dataset.id), 'Status updated.')) { await loadHiring(); updateBadges(); renderHiringPage(); }
+    }
+  });
+  root.addEventListener('input', e => { if (e.target.id === 'hi_q') { hire.q = e.target.value; liveSearch(e.target, renderHiringPage); } });
+  setInterval(async () => {
+    if (!appReady || document.hidden || !hiringReady || !canSee('hiring')) return;
+    const before = jobApps.filter(a => a.status === 'new').length;
+    const r = await sb.from('job_applications').select('*').order('created_at', { ascending: false }).limit(1000);
+    if (r.error) return;
+    jobApps = r.data || []; updateBadges();
+    if (jobApps.filter(a => a.status === 'new').length > before) toast('You have a new job application.');
+    if (ROUTE.page === 'hiring' && !document.querySelector('dialog[open]')) renderHiringPage();
+  }, 30000);
+})();
+
+
+</script>
+<script>
+/* Password show/hide eye: added to every password box, including ones created later */
+(function(){
+  var ICON='<svg class="on" viewBox="0 0 24 24" aria-hidden="true"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="off" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5.5 19 1.5 12 1.5 12a19 19 0 0 1 4.6-5.3M9.9 5.2A10 10 0 0 1 12 5c6.5 0 10.5 7 10.5 7a19 19 0 0 1-2.2 3.1M14.1 14.1A3 3 0 1 1 9.9 9.9M2 2l20 20"/></svg>';
+  function hide(b){var i=b.previousElementSibling;if(i&&i.tagName==='INPUT'){i.type='password';}b.setAttribute('aria-pressed','false');b.setAttribute('aria-label','Show password');}
+  function enhance(inp){
+    if(inp.dataset.pwDone||inp.type!=='password'||!inp.parentNode)return;
+    inp.dataset.pwDone='1';
+    var w=document.createElement('span');w.className='pw-wrap';inp.parentNode.insertBefore(w,inp);w.appendChild(inp);
+    var b=document.createElement('button');b.type='button';b.className='pw-eye';b.setAttribute('aria-pressed','false');b.setAttribute('aria-label','Show password');b.innerHTML=ICON;w.appendChild(b);
+    b.addEventListener('mousedown',function(e){e.preventDefault()});
+    b.addEventListener('click',function(){var show=inp.type==='password';inp.type=show?'text':'password';b.setAttribute('aria-pressed',show?'true':'false');b.setAttribute('aria-label',show?'Hide password':'Show password');inp.focus();});
+  }
+  function scan(root){(root.querySelectorAll?root.querySelectorAll('input[type=password]'):[]).forEach(enhance);}
+  scan(document);
+  new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1){if(n.tagName==='INPUT')enhance(n);else scan(n);}});});}).observe(document.documentElement,{childList:true,subtree:true});
+  /* hide the password again when a dialog closes or a form is sent */
+  document.addEventListener('close',function(e){if(e.target.querySelectorAll)e.target.querySelectorAll('.pw-eye').forEach(hide);},true);
+  document.addEventListener('submit',function(e){if(e.target.querySelectorAll)e.target.querySelectorAll('.pw-eye').forEach(hide);},true);
+})();
 </script>
 </body>
 </html>
